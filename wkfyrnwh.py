@@ -1,5 +1,10 @@
-#pip install pandas geopy PyQt5 PyQtWebEngine
-
+# https://github.com/UB-Mannheim/tesseract/wiki  다음 림크에서 tesseract 를 깔아야 합니다
+# pip install pandas geopy PyQt5 PyQtWebEngine
+# pip install pytesseract pillow
+import os
+import re
+from PIL import Image
+import pytesseract
 import sys
 import math
 import pandas as pd
@@ -7,10 +12,12 @@ from datetime import datetime, timedelta
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QListWidget, QMessageBox,
-    QCheckBox, QComboBox, QDialog, QSpacerItem, QSizePolicy, QTabWidget, QTextEdit
+    QCheckBox, QComboBox, QDialog, QSpacerItem, QSizePolicy, QTabWidget, QTextEdit, QFileDialog, QListWidgetItem
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtCore import QTimer
+
+pytesseract.pytesseract.tesseract_cmd = r'C:/Program Files/Tesseract-OCR/tesseract.exe'
 
 # ========== 유통기한 관리 ==========
 simulated_now = datetime.now()
@@ -78,6 +85,25 @@ def load_cleanhouse_list(filepath):
     df = pd.read_excel(filepath, sheet_name='클린하우스 목록')
     df = df[(df['사용여부'] == 'Y') & df['위도'].notnull() & df['경도'].notnull()]
     return df
+
+def extract_date(data):
+    tempB = []
+    pat = r'\d{2,4}\W\d{2}\W\d{2}'
+    temp_A = re.findall(pat, data)
+    for tempf in temp_A:
+        date = re.sub(r'\W', '-', tempf)
+        parts = date.split('-')
+        if len(parts[0]) == 2:
+            parts[0] = '20' + parts[0]
+        date = '-'.join(parts)
+        tempB.append(date)
+    result = sorted(tempB, reverse=True)
+    return (result)
+
+def use_by_date(image_path):
+    image = Image.open(image_path)
+    text = pytesseract.image_to_string(image, lang='eng')
+    return extract_date(text)
 
 from geopy.geocoders import Nominatim
 def geocode_address(address):
@@ -203,6 +229,20 @@ class FoodStorageTab(QWidget):
         """)
         layout.addWidget(content)
 
+# ========== 식품 항목 위젯 ==========
+class FoodListItem(QWidget):
+    def __init__(self, food_item, delete_callback):
+        super().__init__()
+        layout = QHBoxLayout(self)
+        self.label = QLabel(str(food_item))
+        layout.addWidget(self.label)
+        layout.addStretch()
+        self.delete_btn = QPushButton("삭제")
+        layout.addWidget(self.delete_btn)
+        self.delete_btn.clicked.connect(lambda: delete_callback(food_item.name))
+        layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(layout)
+
 # ========== 전체 앱 ==========
 class FridgeApp(QWidget):
     def __init__(self):
@@ -226,6 +266,9 @@ class FridgeApp(QWidget):
         self.date_input.setPlaceholderText("유통기한 (YYYY-MM-DD)")
         self.add_button = QPushButton("추가")
         self.add_button.clicked.connect(self.add_food)
+        self.ocr_button = QPushButton("📷 이미지로 날짜 인식")
+        self.ocr_button.clicked.connect(self.load_date_from_image)
+        self.input_layout.addWidget(self.ocr_button)
         self.setting_button = QPushButton("⚙️ 설정")
         self.setting_button.clicked.connect(self.open_settings)
         self.input_layout.addWidget(self.name_input)
@@ -285,13 +328,24 @@ class FridgeApp(QWidget):
         for item_name in self.notified_items:
             found_item = next((item for item in self.food_list if item.name == item_name), None)
             if found_item and not found_item.is_expired() and found_item.time_left().total_seconds() / 3600 > self.settings["notify_hours_before"]:
-                 items_to_unnotify.add(item_name)
+                items_to_unnotify.add(item_name)
         self.notified_items -= items_to_unnotify
+
+        # 각 식품 항목에 삭제 버튼이 있는 위젯을 추가
         for item in self.food_list:
+            widget = FoodListItem(item, self.delete_food_by_name)
+            list_item = QListWidgetItem()
+            list_item.setSizeHint(widget.sizeHint())
             if item.is_expired():
-                self.expired_list_widget.addItem(str(item))
+                self.expired_list_widget.addItem(list_item)
+                self.expired_list_widget.setItemWidget(list_item, widget)
             else:
-                self.valid_list_widget.addItem(str(item))
+                self.valid_list_widget.addItem(list_item)
+                self.valid_list_widget.setItemWidget(list_item, widget)
+
+    def delete_food_by_name(self, name):
+        self.food_list = [item for item in self.food_list if item.name != name]
+        self.update_lists()
 
     def open_settings(self):
         dialog = SettingsDialog(self, current_settings=self.settings)
@@ -326,6 +380,19 @@ class FridgeApp(QWidget):
         if messages:
             full_message = "\n\n".join(messages)
             QTimer.singleShot(0, lambda: QMessageBox.warning(self, "식품 알림", full_message))
+
+    def load_date_from_image(self):
+        fname, _ = QFileDialog.getOpenFileName(self, "이미지 선택", "", "Images (*.png *.jpg *.jpeg)")
+        if fname:
+            try:
+                dates = use_by_date(fname)
+                if not dates:
+                    QMessageBox.information(self, "인식 실패", "유통기한 형식의 날짜를 찾을 수 없습니다.")
+                    return
+                self.date_input.setText(dates[0])
+                QMessageBox.information(self, "날짜 인식 성공", f"인식된 유통기한: {dates[0]}")
+            except Exception as e:
+                QMessageBox.critical(self, "오류", f"OCR 실패: {str(e)}")
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
