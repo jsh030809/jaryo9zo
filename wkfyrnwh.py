@@ -7,12 +7,12 @@ from datetime import datetime, timedelta
 from PyQt5.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
     QLabel, QLineEdit, QPushButton, QListWidget, QMessageBox,
-    QCheckBox, QComboBox, QDialog, QSpacerItem, QSizePolicy, QTabWidget
+    QCheckBox, QComboBox, QDialog, QSpacerItem, QSizePolicy, QTabWidget, QTextEdit
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 from PyQt5.QtCore import QTimer
 
-# ========== 유통기한 관리 기존 코드 ==========
+# ========== 유통기한 관리 ==========
 simulated_now = datetime.now()
 def get_now():
     return simulated_now
@@ -73,13 +73,12 @@ class SettingsDialog(QDialog):
         self.settings["notify_hours_before"] = hours
         return self.settings
 
-# ========== 클린하우스 추천 기능 ==========
+# ========== 클린하우스 추천 ==========
 def load_cleanhouse_list(filepath):
     df = pd.read_excel(filepath, sheet_name='클린하우스 목록')
     df = df[(df['사용여부'] == 'Y') & df['위도'].notnull() & df['경도'].notnull()]
     return df
 
-# Nominatim API (geopy) 사용
 from geopy.geocoders import Nominatim
 def geocode_address(address):
     geolocator = Nominatim(user_agent="CleanHouseFinder")
@@ -169,11 +168,46 @@ class CleanhouseFinder(QWidget):
         self.map_view.setHtml(map_html)
         self.map_view.show()
 
-# ========== 기존 FridgeApp에 탭 추가 ==========
+# ========== 식품 보관방법 탭 ==========
+class FoodStorageTab(QWidget):
+    def __init__(self):
+        super().__init__()
+        layout = QVBoxLayout(self)
+        content = QTextEdit()
+        content.setReadOnly(True)
+        content.setHtml("""
+            <h2>  📖 식품 보관 가이드 </h2>
+            <h3>냉장고 보관법</h3>
+            <ul>
+                <li><b>냉동실 상단</b>: 조리된 식품 보관</li>
+                <li><b>냉동실 하단</b>: 생육류·어패류 보관</li>
+                <li><b>냉장실 문쪽</b>: 달걀(금방 먹을 것), 잘 상하지 않는 식품</li>
+                <li><b>신선실</b>: 밀폐용기에 담은 채소·과일</li>
+            </ul>
+            <h3>냉동 보관 주의사항</h3>
+            <table border="1" cellpadding="4" cellspacing="0">
+                <tr><th>식품종류</th><th>보관기간</th><th>주의사항</th></tr>
+                <tr><td>생닭고기 🐔</td><td>12개월</td><td rowspan="2">분할 포장 후 보관</td></tr>
+                <tr><td>생소고기 🐮</td><td>2-3개월</td></tr>
+                <tr><td>해산물   🐟</td><td>1개월</td><td>손질 후 위생팩 사용</td></tr>
+                <tr><td>조리육류 🍖</td><td>6-12개월</td><td>공기차단 포장</td></tr>
+            </table>
+            <h3>❗ 절대 냉동금지 식품</h3>
+            <ul>
+                <li>유제품 🥛(마요네즈, 요거트)</li>
+                <li>달걀 🥚(껍질 파손 위험)</li>
+                <li>수분많은 채소 🥒(상추, 오이)</li>
+                <li>통조림 🥫(용기 파열 위험)</li>
+            </ul>
+            <p style="color:gray; font-size:0.8em;">출처: 식약처 블로그</p>
+        """)
+        layout.addWidget(content)
+
+# ========== 전체 앱 ==========
 class FridgeApp(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("냉장고 유통기한 관리 & 클린하우스 추천")
+        self.setWindowTitle("냉장고 유통기한 관리 & 클린하우스 추천 & 식품보관방법")
         self.food_list = []
         self.settings = {"night_notify": True, "notify_hours_before": 24}
         self.notified_items = set()
@@ -209,6 +243,9 @@ class FridgeApp(QWidget):
         self.fridge_layout.addWidget(QLabel("⚠️ 유통기한 지난 식품"))
         self.fridge_layout.addWidget(self.expired_list_widget)
         self.tabs.addTab(self.fridge_tab, "유통기한 관리")
+        # 식품 보관방법 탭
+        self.storage_tab = FoodStorageTab()
+        self.tabs.addTab(self.storage_tab, "식품 보관방법")
         # 클린하우스 추천 탭
         self.cleanhouse_tab = CleanhouseFinder()
         self.tabs.addTab(self.cleanhouse_tab, "주변 클린하우스")
